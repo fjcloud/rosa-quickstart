@@ -13,8 +13,8 @@ Deploy a Red Hat OpenShift Service on AWS (ROSA) Hosted Control Plane (HCP) clus
 
 1. **Create a service account:**
    - Go to [Red Hat Cloud Services Console](https://console.redhat.com/iam/service-accounts)
-   - Create a new service account with appropriate permissions
-
+   - Create a new service account
+   
 2. **Export environment variables:**
    ```bash
    export RHCS_CLIENT_ID="your-client-id-here"
