@@ -1,0 +1,18 @@
+# Cluster configuration
+cluster_name = "my-cluster"
+aws_region   = "eu-west-3"
+
+# Common tags for all resources (optional)
+#global_tags = {
+#  "app-code"      = "YOUR-APP-CODE"
+#  "cost-center"   = "YOUR-COST-CENTER"
+#  "owner"         = "your-email@company.com"
+#  "service-phase" = "dev"
+#}
+
+# Network configuration
+vpc_cidr                 = "10.10.0.0/16"
+availability_zones_count = 3
+
+# OpenShift version
+openshift_version = "4.19.3" 
