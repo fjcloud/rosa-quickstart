@@ -37,7 +37,7 @@ variable "aws_region" {
 variable "cluster_name" {
   description = "Name of the ROSA cluster"
   type        = string
-  default     = "my_cluster"
+  default     = "my-cluster"
 }
 
 variable "openshift_version" {
