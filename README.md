@@ -40,7 +40,7 @@ Deploy a Red Hat OpenShift Service on AWS (ROSA) Hosted Control Plane (HCP) clus
 
 4. **Connect to the cluster:**
    ```bash
-  make 
+  $(terraform output -raw oc_login_command)
    ```
 
 ## Cleanup
