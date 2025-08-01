@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/time"
       version = ">= 0.9"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.0"
+    }
   }
   required_version = ">= 1.0"
 }
@@ -142,9 +146,193 @@ module "rosa_cluster_hcp" {
   ]
 }
 
+# RDS Oracle Database for Dev/Test
+resource "random_password" "oracle_password" {
+  length           = 16
+  special          = false
+  upper            = true
+  lower            = true
+  numeric          = true
+  override_special = "!@#$%"
+}
+
+resource "aws_db_subnet_group" "oracle" {
+  name       = "${var.cluster_name}-oracle-subnet-group"
+  subnet_ids = module.vpc.private_subnets
+
+  tags = var.global_tags
+}
+
+resource "aws_security_group" "oracle" {
+  name_prefix = "${var.cluster_name}-oracle-sg"
+  vpc_id      = module.vpc.vpc_id
+
+  # Allow Oracle port from entire VPC CIDR (all nodes in the VPC)
+  ingress {
+    from_port   = 1521
+    to_port     = 1521
+    protocol    = "tcp"
+    cidr_blocks = [module.vpc.cidr_block]
+    description = "Oracle access from VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = var.global_tags
+}
+
+resource "aws_db_instance" "oracle" {
+  identifier = "${var.cluster_name}-oracle"
+
+  # Oracle configuration based on your example
+  engine         = "oracle-se2"
+  engine_version = "19.0.0.0.ru-2025-04.rur-2025-04.r1"
+  instance_class = "db.m5.large"
+  license_model  = "license-included"
+
+  # Storage configuration
+  allocated_storage     = 200
+  max_allocated_storage = 1000
+  storage_type          = "gp3"
+  storage_encrypted     = true
+  iops                  = 12000
+  storage_throughput    = 500
+
+  # Credentials
+  username = "admin"
+  password = random_password.oracle_password.result
+
+  # Network configuration
+  db_subnet_group_name   = aws_db_subnet_group.oracle.name
+  vpc_security_group_ids = [aws_security_group.oracle.id]
+  publicly_accessible    = false
+
+  # Parameter group
+  parameter_group_name = aws_db_parameter_group.oracle.name
+
+  # Backup and maintenance
+  backup_retention_period    = 7
+  backup_window              = "08:46-09:16"
+  maintenance_window         = "sat:05:45-sat:06:15"
+  auto_minor_version_upgrade = true
+
+  # Performance insights
+  performance_insights_enabled          = true
+  performance_insights_retention_period = 7
+
+  # Monitoring
+  monitoring_interval = 60
+  monitoring_role_arn = aws_iam_role.rds_monitoring.arn
+
+  # Deletion protection for dev/test
+  deletion_protection = false
+
+  # Skip final snapshot for dev/test
+  skip_final_snapshot = true
+
+  # Character sets
+  character_set_name = "AL32UTF8"
+
+  # Copy tags to snapshots
+  copy_tags_to_snapshot = true
+
+  tags = merge(var.global_tags, {
+    Name        = "${var.cluster_name}-oracle-db"
+    Environment = "dev-test"
+  })
+
+  depends_on = [module.vpc]
+}
+
+# Custom Oracle Parameter Group
+resource "aws_db_parameter_group" "oracle" {
+  family = "oracle-se2-19"
+  name   = "${var.cluster_name}-oracle-params"
+
+  parameter {
+    name  = "nls_length_semantics"
+    value = "CHAR"
+  }
+
+  parameter {
+    name  = "open_cursors"
+    value = "1000"
+  }
+
+  parameter {
+    name  = "cursor_sharing"
+    value = "FORCE"
+  }
+
+  tags = var.global_tags
+}
+
+# IAM role for RDS monitoring
+resource "aws_iam_role" "rds_monitoring" {
+  name = "${var.cluster_name}-rds-monitoring-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "monitoring.rds.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = var.global_tags
+}
+
+resource "aws_iam_role_policy_attachment" "rds_monitoring" {
+  role       = aws_iam_role.rds_monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonRDSEnhancedMonitoringRole"
+}
+
 # Outputs - Only oc login command
 output "oc_login_command" {
   description = "OC login command for the cluster"
   value       = "oc login ${module.rosa_cluster_hcp.cluster_api_url} -u ${module.rosa_cluster_hcp.cluster_admin_username} -p ${module.rosa_cluster_hcp.cluster_admin_password}"
   sensitive   = true
+}
+
+# Oracle Database Outputs
+output "oracle_endpoint" {
+  description = "Oracle database endpoint"
+  value       = aws_db_instance.oracle.endpoint
+}
+
+output "oracle_port" {
+  description = "Oracle database port"
+  value       = aws_db_instance.oracle.port
+}
+
+output "oracle_username" {
+  description = "Oracle database username"
+  value       = aws_db_instance.oracle.username
+}
+
+output "oracle_password" {
+  description = "Oracle database password"
+  value       = random_password.oracle_password.result
+  sensitive   = true
+}
+
+output "oracle_connection_string" {
+  description = "Oracle database connection string"
+  value       = "oracle://${aws_db_instance.oracle.username}:${random_password.oracle_password.result}@${aws_db_instance.oracle.endpoint}:${aws_db_instance.oracle.port}/DATABASE"
+  sensitive   = true
+}
+
+output "oracle_status" {
+  description = "Oracle database status"
+  value       = aws_db_instance.oracle.status
 }
