@@ -1,18 +1,59 @@
-# OpenShift Install
+# ROSA HCP Cluster Terraform
 
-The OpenShift installer `openshift-install` makes it easy to get a cluster
-running on the public cloud or your local infrastructure.
+Deploy a Red Hat OpenShift Service on AWS (ROSA) Hosted Control Plane (HCP) cluster using Terraform.
 
-To learn more about installing OpenShift, visit [docs.openshift.com](https://docs.openshift.com)
-and select the version of OpenShift you are using.
+## Prerequisites
 
-## Installing the tools
+- AWS CLI configured
+- Terraform >= 1.0
+- OpenShift CLI (oc)
+- Red Hat Cloud Services (RHCS) service account
 
-After extracting this archive, you can move the `openshift-install` binary
-to a location on your PATH such as `/usr/local/bin`, or keep it in a temporary
-directory and reference it via `./openshift-install`.
+## Authentication
 
-## License
+1. **Create a service account:**
+   - Go to [Red Hat Cloud Services Console](https://console.redhat.com/iam/service-accounts)
+   - Create a new service account
+   
+2. **Export environment variables:**
+   ```bash
+   export RHCS_CLIENT_ID="your-client-id-here"
+   export RHCS_CLIENT_SECRET="your-client-secret-here"
+   ```
 
-OpenShift is licensed under the Apache Public License 2.0. The source code for this
-program is [located on github](https://github.com/openshift/installer).
+## Quick Start
+
+1. **Copy the example configuration:**
+   ```bash
+   cp terraform.tfvars.example terraform.tfvars
+   ```
+
+2. **Edit the configuration:**
+   ```bash
+   vim terraform.tfvars
+   ```
+
+3. **Deploy the cluster:**
+   ```bash
+   make deploy
+   ```
+
+4. **Connect to the cluster:**
+   ```bash
+  make 
+   ```
+
+## Cleanup
+
+```bash
+make clean
+```
+
+## Variables
+
+- `cluster_name`: Name of the ROSA cluster
+- `aws_region`: AWS region for deployment
+- `global_tags`: Global tags applied to all resources (optional)
+- `vpc_cidr`: CIDR block for VPC
+- `availability_zones_count`: Number of availability zones
+- `openshift_version`: OpenShift version to deploy 
