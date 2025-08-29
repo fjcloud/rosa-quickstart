@@ -56,4 +56,5 @@ make clean
 - `global_tags`: Global tags applied to all resources (optional)
 - `vpc_cidr`: CIDR block for VPC
 - `availability_zones_count`: Number of availability zones
-- `openshift_version`: OpenShift version to deploy 
+- `openshift_version`: OpenShift version to deploy
+- `private`: Cluster private (false by default)

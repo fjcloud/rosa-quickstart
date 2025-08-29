@@ -40,6 +40,13 @@ variable "cluster_name" {
   default     = "my-cluster"
 }
 
+
+variable "private" {
+  description = "Does the cluster is private"
+  type        = bool
+  default     = false
+}
+
 variable "openshift_version" {
   description = "OpenShift version"
   type        = string
@@ -122,8 +129,9 @@ module "rosa_cluster_hcp" {
 
   # Network configuration
   machine_cidr           = module.vpc.cidr_block
-  aws_subnet_ids         = concat(module.vpc.public_subnets, module.vpc.private_subnets)
+  aws_subnet_ids         = var.private ? module.vpc.private_subnets : concat(module.vpc.public_subnets, module.vpc.private_subnets)
   aws_availability_zones = module.vpc.availability_zones
+  private                = var.private
 
   # Compute configuration
   replicas             = var.availability_zones_count
