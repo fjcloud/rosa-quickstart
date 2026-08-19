@@ -129,7 +129,7 @@ module "rosa_cluster_hcp" {
 
   # Network configuration
   machine_cidr           = module.vpc.cidr_block
-  aws_subnet_ids         = var.private ? module.vpc.private_subnets : concat(module.vpc.public_subnets, module.vpc.private_subnets)
+  aws_subnet_ids         = concat(module.vpc.public_subnets, module.vpc.private_subnets)
   aws_availability_zones = module.vpc.availability_zones
   private                = var.private
 

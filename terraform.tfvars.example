@@ -1,4 +1,5 @@
 # Cluster configuration
+# cluster_name is overridden by: make deploy NAME=<name>
 cluster_name = "my-cluster"
 aws_region   = "eu-west-3"
 
