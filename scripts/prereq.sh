@@ -230,25 +230,25 @@ vcpus="$(aws ec2 describe-instance-types --region "${region}" --instance-types "
 need_vcpu=$((replicas * vcpus))
 
 require_quota() {
-  local code="$1" need="$2" label="$3" have
-  if ! have="$(aws service-quotas get-service-quota --region "${region}" --service-code ec2 --quota-code "${code}" --query 'Quota.Value' --output text 2>/tmp/quota.err)"; then
-    echo "Could not read EC2 quota ${code} (${label}). Check Service Quotas in ${region}." >&2
+  local service="$1" code="$2" need="$3" label="$4" have
+  if ! have="$(aws service-quotas get-service-quota --region "${region}" --service-code "${service}" --quota-code "${code}" --query 'Quota.Value' --output text 2>/tmp/quota.err)"; then
+    echo "Could not read ${service} quota ${code} (${label}). Check Service Quotas in ${region}." >&2
     cat /tmp/quota.err >&2
     exit 1
   fi
   python3 -c 'import sys; raise SystemExit(0 if float(sys.argv[1]) + 1e-6 >= float(sys.argv[2]) else 1)' "${have}" "${need}" || {
     echo "Error: ${label} in ${region} is ${have}; this cluster needs ${need}." >&2
     echo "Request a higher quota, then run make prereq again:" >&2
-    echo "  aws service-quotas request-service-quota-increase --service-code ec2 --quota-code ${code} --desired-value ${need} --region ${region}" >&2
+    echo "  aws service-quotas request-service-quota-increase --service-code ${service} --quota-code ${code} --desired-value ${need} --region ${region}" >&2
     exit 1
   }
   echo "${label}: ${have} available, ${need} required."
 }
 
 echo "Checking quota for ${replicas} ${machine} workers in ${az_count} zone(s)..."
-require_quota L-1216C47A "${need_vcpu}" "Standard On-Demand vCPUs"
-require_quota L-FE5A380F 1 "NAT gateways per Availability Zone"
-require_quota L-0263D0A3 "${az_count}" "VPC Elastic IP addresses"
-require_quota L-F678F1CE 1 "VPCs per Region"
+require_quota ec2 L-1216C47A "${need_vcpu}" "Standard On-Demand vCPUs"
+require_quota vpc L-FE5A380F 1 "NAT gateways per Availability Zone"
+require_quota ec2 L-0263D0A3 "${az_count}" "VPC Elastic IP addresses"
+require_quota vpc L-F678F1CE 1 "VPCs per Region"
 
 echo "Prerequisites are ready. Deploy with: make deploy NAME=<name>"
