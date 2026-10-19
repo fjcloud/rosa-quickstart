@@ -6,10 +6,9 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 
 ## Prerequisites
 
-- AWS CLI configured
-- Terraform >= 1.0
-- OpenShift CLI (oc)
-- Red Hat Cloud Services (RHCS) service account
+- AWS CLI credentials in the environment, or a working `aws` profile. The workshop shell is already signed in. `/usr/local/bin/auth-aws` is only a fallback for a Red Hat employee shell that has no AWS credentials yet.
+- Terraform >= 1.0, the ROSA CLI, and `oc`. `make prereq` installs Terraform when it is missing, and installs `rosa` and `oc` on x86_64 when they are missing.
+- A Red Hat Cloud Services service account (or `RHCS_TOKEN`)
 
 ## Authentication
 
@@ -25,7 +24,9 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
    EOF
    ```
 
-3. **Credentials on deploy/clean:** `make deploy` / `make clean` source `.env` and `/usr/local/bin/auth-aws` in-process (not copied elsewhere). Overrides: `DOTENV=...`, `AUTH_AWS=...`. Kerberos/`kinit` must already be valid for `auth-aws`.
+3. **Account link and quota:** `make prereq` signs in with the service account, creates and links the OCM role and the user role, creates the load-balancer service-linked role, and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
+
+4. **Credentials on deploy/clean:** `make deploy` runs `make prereq`, then sources `.env` in-process. It uses AWS credentials already in the shell. It calls `auth-aws` only when those credentials are absent. Overrides: `DOTENV=...`, `AUTH_AWS=...`.
 
 `.env` and `terraform.tfvars` are gitignored. Never put RHCS secrets, AWS keys, or kubeconfigs in this repo.
 
@@ -43,7 +44,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 
    `cluster_name` in `terraform.tfvars` is overridden by `NAME=` on the command line.
 
-3. **Deploy a cluster** (`NAME` is required):
+3. **Deploy a cluster** (`NAME` is required). This runs `make prereq` first:
    ```bash
    make deploy NAME=fja-hcp1
    ```
@@ -83,7 +84,8 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 | Target | Description |
 |--------|-------------|
-| `make deploy NAME=<name>` | init → plan → apply → print oc login |
+| `make prereq` | tools, Red Hat account link, quota, default `terraform.tfvars` |
+| `make deploy NAME=<name>` | prereq → init → plan → apply → print oc login |
 | `make clean NAME=<name>` | destroy cluster + VPC orphans + workspace |
 | `make output NAME=<name>` | print oc login command |
 | `make list` | list cluster workspaces |
@@ -96,5 +98,8 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 - `global_tags`: Global tags applied to all resources (optional)
 - `vpc_cidr`: CIDR block for VPC
 - `availability_zones_count`: Number of availability zones
-- `openshift_version`: OpenShift version to deploy
+- `replicas`: Worker count. Defaults to 2 for one AZ, otherwise one per AZ
+- `compute_machine_type`: Worker instance type (`m7i.xlarge` by default)
+- `openshift_version`: OpenShift version to deploy (default `4.22.18`, the current hosted control plane default)
 - `private`: Cluster private (false by default)
+- `no_cni`: Skip the default OVN-Kubernetes CNI (`false` by default). Same as `rosa create cluster --hosted-cp --no-cni`. Requires provider `rhcs` >= 1.7.8, which sets cluster network type to `Other`. Worker nodes stay `NotReady` until you install a CNI. Override on the command line with `make deploy NAME=<name> NO_CNI=true`. Cannot be changed after the cluster is created.

@@ -6,7 +6,7 @@ terraform {
     }
     rhcs = {
       source  = "terraform-redhat/rhcs"
-      version = ">= 1.6.5"
+      version = ">= 1.7.8"
     }
     time = {
       source  = "hashicorp/time"
@@ -47,10 +47,28 @@ variable "private" {
   default     = false
 }
 
+variable "no_cni" {
+  description = "Opt out of the default OVN-Kubernetes CNI (rosa create cluster --no-cni). Install your own CNI after create; worker nodes stay NotReady until then. Cannot be changed after create."
+  type        = bool
+  default     = false
+}
+
 variable "openshift_version" {
   description = "OpenShift version"
   type        = string
-  default     = "4.19.3"
+  default     = "4.22.18"
+}
+
+variable "compute_machine_type" {
+  description = "Worker instance type. ROSA HCP workers need at least 4 vCPUs and 16 GiB."
+  type        = string
+  default     = "m7i.xlarge"
+}
+
+variable "replicas" {
+  description = "Worker count. Leave unset for one worker per AZ, or 2 workers when availability_zones_count is 1. Single-AZ clusters need at least 2 workers. Multi-AZ clusters need a multiple of the AZ count."
+  type        = number
+  default     = null
 }
 
 variable "vpc_cidr" {
@@ -69,6 +87,10 @@ variable "global_tags" {
   description = "Global tags to apply to all resources"
   type        = map(string)
   default     = {}
+}
+
+locals {
+  worker_replicas = var.replicas != null ? var.replicas : (var.availability_zones_count < 2 ? 2 : var.availability_zones_count)
 }
 
 # VPC Module
@@ -115,7 +137,7 @@ module "operator_roles" {
 
 # ROSA HCP Cluster
 module "rosa_cluster_hcp" {
-  source = "terraform-redhat/rosa-hcp/rhcs//modules/rosa-cluster-hcp"
+  source = "./modules/rosa-cluster-hcp"
 
   cluster_name         = var.cluster_name
   openshift_version    = var.openshift_version
@@ -132,10 +154,13 @@ module "rosa_cluster_hcp" {
   aws_subnet_ids         = concat(module.vpc.public_subnets, module.vpc.private_subnets)
   aws_availability_zones = module.vpc.availability_zones
   private                = var.private
+  no_cni                 = var.no_cni
+  # Without a CNI, workers never become Ready, so do not wait on them.
+  wait_for_std_compute_nodes_complete = !var.no_cni
 
   # Compute configuration
-  replicas             = var.availability_zones_count
-  compute_machine_type = "m7i.xlarge"
+  replicas             = local.worker_replicas
+  compute_machine_type = var.compute_machine_type
 
   # Create admin user with auto-generated password
   create_admin_user = true

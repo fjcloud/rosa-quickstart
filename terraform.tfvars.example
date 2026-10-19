@@ -15,5 +15,13 @@ aws_region   = "eu-west-3"
 vpc_cidr                 = "10.10.0.0/16"
 availability_zones_count = 3
 
+# Workers. One zone needs at least 2. Three zones use one worker per zone when replicas is unset.
+# compute_machine_type = "m7i.xlarge"
+# replicas             = 3
+
 # OpenShift version
-openshift_version = "4.19.3" 
+openshift_version = "4.22.18"
+
+# Opt out of the default OVN-Kubernetes CNI (same as: rosa create cluster --no-cni).
+# Workers stay NotReady until you install your own CNI. Cannot be changed after create.
+# no_cni = false 

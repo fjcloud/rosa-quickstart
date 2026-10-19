@@ -1,26 +1,32 @@
-.PHONY: help deploy clean list output check-name _init _workspace _fmt _validate _tf-deploy _destroy _clean-workspace
+.PHONY: help prereq deploy clean list output check-name _init _workspace _fmt _validate _tf-deploy _destroy _clean-workspace
 
 # Cluster name (required for deploy, clean, output). Isolates Terraform state via workspaces.
 NAME ?=
-TF_VAR_ARGS := -var=cluster_name=$(NAME)
+# NO_CNI=true opts out of OVN-Kubernetes (rosa --no-cni). Default keeps the CNI.
+NO_CNI ?= false
+TF_VAR_ARGS := -var=cluster_name=$(NAME) -var=no_cni=$(NO_CNI)
 # Pin workspace per-command so parallel make deploy NAME=... from other shells do not race.
 TF := TF_WORKSPACE=$(NAME) terraform
 
 # Creds sourced in-process (never copied to another file).
-AUTH_AWS ?= /usr/local/bin/auth-aws
-DOTENV ?= .env
+# Existing AWS credentials win. auth-aws is only the fallback when this shell has none.
+export AUTH_AWS ?= /usr/local/bin/auth-aws
+export DOTENV ?= .env
+export PATH := $(HOME)/.local/bin:$(PATH)
 
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  deploy NAME=<name>  - Source .env + auth-aws, then deploy a ROSA HCP cluster"
-	@echo "  clean NAME=<name>   - Source .env + auth-aws, then destroy that cluster/workspace"
+	@echo "  prereq              - Install tools, link the AWS account, check quota"
+	@echo "  deploy NAME=<name>  - Run prereq, then deploy a ROSA HCP cluster"
+	@echo "  clean NAME=<name>   - Destroy that cluster/workspace"
 	@echo "  output NAME=<name>  - Print oc login command for that cluster"
 	@echo "  list                - List cluster workspaces"
 	@echo "  help                - Show this help message"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make deploy NAME=fja-hcp1"
+	@echo "  make deploy NAME=fja-nocni NO_CNI=true"
 	@echo "  make deploy NAME=fja-hcp2    # parallel OK from another shell"
 	@echo "  make output NAME=fja-hcp1"
 	@echo "  make clean NAME=fja-hcp1"
@@ -36,8 +42,11 @@ check-name:
 		exit 1; \
 	fi
 
+prereq:
+	@bash scripts/prereq.sh
+
 # Complete deployment workflow
-deploy: check-name _init _fmt _validate _tf-deploy output
+deploy: check-name prereq _init _fmt _validate _tf-deploy output
 
 # Complete cleanup workflow (one cluster only; does not wipe shared .terraform/)
 clean: check-name _init _destroy _clean-workspace
@@ -73,30 +82,20 @@ _validate: check-name
 	@echo "Validating Terraform configuration..."
 	@$(TF) validate
 
-# One shell: source .env + auth-aws then plan+apply (creds stay in memory only).
+# One shell: load RHCS + AWS credentials, then plan+apply (creds stay in memory only).
 _tf-deploy: check-name
-	@if [ ! -f "$(DOTENV)" ]; then echo "Error: $(DOTENV) not found (need RHCS_CLIENT_ID/SECRET)"; exit 1; fi
-	@if [ ! -f "$(AUTH_AWS)" ]; then echo "Error: $(AUTH_AWS) not found"; exit 1; fi
 	@bash -c 'set -euo pipefail; \
-		echo "Loading RHCS credentials from $(DOTENV)..."; \
-		source "$(DOTENV)"; \
-		echo "Refreshing AWS credentials via $(AUTH_AWS)..."; \
-		source "$(AUTH_AWS)"; \
+		source "$(CURDIR)/scripts/load-creds.sh"; \
 		export TF_WORKSPACE="$(NAME)"; \
 		echo "Generating Terraform execution plan for $(NAME)..."; \
 		terraform plan $(TF_VAR_ARGS); \
 		echo "Applying Terraform configuration for $(NAME)..."; \
 		terraform apply -auto-approve $(TF_VAR_ARGS)'
 
-# One shell: source .env + auth-aws then full destroy flow (creds stay in memory only).
+# One shell: load RHCS + AWS credentials, then full destroy flow (creds stay in memory only).
 _destroy: check-name _workspace
-	@if [ ! -f "$(DOTENV)" ]; then echo "Error: $(DOTENV) not found (need RHCS_CLIENT_ID/SECRET)"; exit 1; fi
-	@if [ ! -f "$(AUTH_AWS)" ]; then echo "Error: $(AUTH_AWS) not found"; exit 1; fi
 	@bash -c 'set -euo pipefail; \
-		echo "Loading RHCS credentials from $(DOTENV)..."; \
-		source "$(DOTENV)"; \
-		echo "Refreshing AWS credentials via $(AUTH_AWS)..."; \
-		source "$(AUTH_AWS)"; \
+		source "$(CURDIR)/scripts/load-creds.sh"; \
 		export TF_WORKSPACE="$(NAME)"; \
 		_state="$$(terraform state list 2>/dev/null || true)"; \
 		echo "Destroying ROSA cluster $(NAME) first..."; \
