@@ -80,6 +80,10 @@ region="${region:-us-east-2}"
 export AWS_DEFAULT_REGION="${region}"
 echo "AWS account ${account}, region ${region}"
 
+# Require an approved payer before preparing IAM or cluster resources.
+echo "Checking the selected ROSA HCP Marketplace billing account..."
+python3 "${root}/scripts/check-marketplace.py"
+
 # ROSA/Terraform needs the no-console OCM role; it does not need a user-role.
 # Preserve an existing association instead of upgrading it to an admin profile.
 status=0
@@ -90,11 +94,6 @@ if [[ "${status}" -eq 3 ]]; then
 elif [[ "${status}" -ne 0 ]]; then
   exit "${status}"
 fi
-
-# Billing may use a different account; validate the selected payer before Terraform.
-echo "Checking the ROSA HCP Marketplace billing association..."
-python3 "${root}/scripts/check-marketplace.py" --aws-account "${account}"
-
 
 echo "Ensuring the load balancer service-linked role exists..."
 slr_out="$(aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com 2>&1 || true)"

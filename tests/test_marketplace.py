@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -66,25 +67,68 @@ class MarketplaceTests(unittest.TestCase):
     def test_billing_configuration_matches_make_and_file_precedence(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             directory = Path(tmp)
-            self.assertEqual(marketplace.configured_billing_account(LAB, directory), LAB)
+            with self.assertRaises(marketplace.PrerequisiteError):
+                marketplace.configured_billing_account(directory)
             os.environ['TF_VAR_aws_billing_account_id'] = '333333333333'
             (directory / 'terraform.tfvars').write_text('aws_billing_account_id = "'+PAYER+'" # selected payer\n')
-            self.assertEqual(marketplace.configured_billing_account(LAB, directory), PAYER)
+            self.assertEqual(marketplace.configured_billing_account(directory), PAYER)
             (directory / 'z.auto.tfvars.json').write_text(json.dumps({'aws_billing_account_id': '444444444444'}))
-            self.assertEqual(marketplace.configured_billing_account(LAB, directory), '444444444444')
+            self.assertEqual(marketplace.configured_billing_account(directory), '444444444444')
             os.environ['BILLING_ACCOUNT_ID'] = '555555555555'
-            self.assertEqual(marketplace.configured_billing_account(LAB, directory), '555555555555')
+            self.assertEqual(marketplace.configured_billing_account(directory), '555555555555')
             os.environ['BILLING_ACCOUNT_ID'] = 'invalid'
             with self.assertRaises(marketplace.PrerequisiteError):
-                marketplace.configured_billing_account(LAB, directory)
+                marketplace.configured_billing_account(directory)
 
-    def test_null_and_commented_settings_do_not_override_infrastructure(self):
+    def test_null_and_commented_settings_do_not_select_a_payer(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             directory = Path(tmp)
             (directory / 'terraform.tfvars').write_text('/*\naws_billing_account_id = "'+PAYER+'"\n*/\naws_billing_account_id = null\n')
-            self.assertEqual(marketplace.configured_billing_account(LAB, directory), LAB)
+            with self.assertRaises(marketplace.PrerequisiteError):
+                marketplace.configured_billing_account(directory)
 
-    def test_prereq_stops_before_terraform_and_preserves_existing_ocm_role(self):
+    def test_cli_does_not_infer_billing_from_the_lab_or_call_cloud_apis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            for name in ['aws', 'rosa']:
+                binary = directory / name
+                binary.write_text('#!/bin/sh\ntouch "$HOME/unexpected-cli-call"\nexit 99\n')
+                binary.chmod(0o755)
+            env = {'HOME': tmp, 'PATH': tmp + os.pathsep + os.environ['PATH']}
+            result = subprocess.run(
+                [sys.executable, str(ROOT / 'scripts/check-marketplace.py'), '--aws-account', LAB],
+                cwd=tmp, env=env, text=True, capture_output=True,
+            )
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('No ROSA billing account selected', result.stderr)
+            self.assertNotIn(LAB, result.stderr)
+            self.assertFalse((directory / 'unexpected-cli-call').exists())
+
+    def test_explicit_lab_account_remains_a_valid_selection(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {'BILLING_ACCOUNT_ID': LAB}, clear=True):
+            self.assertEqual(marketplace.configured_billing_account(Path(tmp)), LAB)
+
+    def test_make_passes_the_payer_loaded_from_credentials_to_plan_and_apply(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            binary = directory / 'terraform'
+            binary.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$HOME/terraform-commands"\n')
+            binary.chmod(0o755)
+            dotenv = directory / '.env'
+            dotenv.write_text('export BILLING_ACCOUNT_ID=' + PAYER + '\n')
+            env = {**os.environ, 'HOME': tmp, 'PATH': tmp + os.pathsep + os.environ['PATH'],
+                   'DOTENV': str(dotenv), 'RHCS_TOKEN': 'test-only-token',
+                   'AWS_ACCESS_KEY_ID': 'test', 'BILLING_ACCOUNT_ID': LAB}
+            result = subprocess.run(['make', '_tf-deploy', 'NAME=test'], cwd=ROOT,
+                                    env=env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            commands = (directory / 'terraform-commands').read_text().splitlines()
+            self.assertEqual(len(commands), 2)
+            for command in commands:
+                self.assertIn('-var=aws_billing_account_id=' + PAYER, command)
+                self.assertNotIn(LAB, command)
+
+    def test_prereq_stops_before_iam_and_terraform_on_missing_billing(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
             binary = directory / 'bin'
@@ -92,7 +136,7 @@ class MarketplaceTests(unittest.TestCase):
             commands = {
                 'aws': '#!/bin/sh\ncase "$1 $2" in "sts get-caller-identity") echo '+LAB+';; *) echo forbidden-aws-mutation >> "$HOME/forbidden"; exit 91;; esac\n',
                 'rosa': '#!/bin/sh\nif [ "$1" = login ]; then exit 0; fi\necho forbidden-rosa-mutation >> "$HOME/forbidden"; exit 91\n',
-                'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) exit 0;; *) echo billing-not-linked >&2; exit 1;; esac\n',
+                'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) echo forbidden-ocm-check >> "$HOME/forbidden"; exit 91;; *) echo billing-not-linked >&2; exit 1;; esac\n',
                 'terraform': '#!/bin/sh\necho forbidden-terraform >> "$HOME/forbidden"; exit 91\n',
                 'oc': '#!/bin/sh\nexit 0\n',
             }
@@ -114,9 +158,9 @@ class MarketplaceTests(unittest.TestCase):
             binary = directory / 'bin'
             binary.mkdir()
             commands = {
-                'aws': '#!/bin/sh\ncase "$1 $2" in "sts get-caller-identity") echo '+LAB+';; *) exit 91;; esac\n',
-                'rosa': '#!/bin/sh\nif [ "$1" = login ]; then exit 0; fi\nprintf "%s\\n" "$*" > "$HOME/ocm-call"\n',
-                'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) if [ -f "$HOME/ocm-checked" ]; then test -f "$HOME/ocm-call"; else touch "$HOME/ocm-checked"; exit 3; fi;; *) echo billing-not-linked >&2; exit 1;; esac\n',
+                'aws': '#!/bin/sh\ncase "$1 $2" in "sts get-caller-identity") echo '+LAB+';; *) echo stopped-after-ocm-verification; exit 91;; esac\n',
+                'rosa': '#!/bin/sh\nif [ "$1" = login ]; then exit 0; fi\ntest -f "$HOME/billing-checked" || exit 92\nprintf "%s\\n" "$*" > "$HOME/ocm-call"\n',
+                'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) if [ -f "$HOME/ocm-checked" ]; then test -f "$HOME/ocm-call"; else touch "$HOME/ocm-checked"; exit 3; fi;; *) touch "$HOME/billing-checked";; esac\n',
                 'terraform': '#!/bin/sh\necho forbidden > "$HOME/terraform-call"; exit 91\n',
                 'oc': '#!/bin/sh\nexit 0\n',
             }
@@ -131,7 +175,7 @@ class MarketplaceTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stdout+result.stderr)
             self.assertEqual((directory / 'ocm-call').read_text().strip(),
                              'create ocm-role --no-console --mode auto --prefix CloudTerminal --yes')
-            self.assertIn('billing-not-linked', result.stderr)
+            self.assertIn('stopped-after-ocm-verification', result.stderr)
             self.assertFalse((directory / 'terraform-call').exists())
 
 

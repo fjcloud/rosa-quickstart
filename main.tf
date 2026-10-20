@@ -41,11 +41,10 @@ variable "cluster_name" {
 }
 
 variable "aws_billing_account_id" {
-  description = "AWS account linked to the Red Hat organization for ROSA HCP Marketplace billing. Defaults to the infrastructure account."
+  description = "Explicit organizer-approved AWS account linked to the Red Hat organization for ROSA HCP Marketplace billing."
   type        = string
-  default     = null
   validation {
-    condition     = var.aws_billing_account_id == null || var.aws_billing_account_id == "" || can(regex("^[0-9]{12}$", var.aws_billing_account_id))
+    condition     = can(regex("^[0-9]{12}$", var.aws_billing_account_id))
     error_message = "aws_billing_account_id must contain exactly 12 digits."
   }
 }

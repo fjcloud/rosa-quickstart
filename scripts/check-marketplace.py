@@ -102,7 +102,7 @@ def check_ocm_role(account, token):
     raise MissingOCMRole("No OCM role is linked for this AWS account; preparing one in auto mode.")
 
 
-def configured_billing_account(infrastructure_account, directory=Path(".")):
+def configured_billing_account(directory=Path(".")):
     # Match Terraform's normal variable-file precedence. The Makefile's explicit
     # BILLING_ACCOUNT_ID becomes a -var argument and therefore takes precedence.
     value = os.environ.get("TF_VAR_aws_billing_account_id") or None
@@ -126,7 +126,13 @@ def configured_billing_account(infrastructure_account, directory=Path(".")):
                 if not match:
                     raise PrerequisiteError(f"Use a literal 12-digit aws_billing_account_id in {path.name}.")
                 value = match.group(1) or match.group(2)
-    value = os.environ.get("BILLING_ACCOUNT_ID") or value or infrastructure_account
+    value = os.environ.get("BILLING_ACCOUNT_ID") or value
+    if value is None or value == "":
+        raise PrerequisiteError(
+            "No ROSA billing account selected. Ask the organizer for the approved payer and set "
+            "BILLING_ACCOUNT_ID=<12-digit-account> or aws_billing_account_id in terraform.tfvars. "
+            "The lab account is never selected automatically."
+        )
     value = str(value)
     if not re.fullmatch(r"[0-9]{12}", value):
         raise PrerequisiteError("BILLING_ACCOUNT_ID must be a 12-digit AWS account ID.")
@@ -142,22 +148,26 @@ def output(command, failure):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--aws-account", help="Infrastructure account; defaults to the signed-in AWS account")
+    parser.add_argument("--aws-account", help="Infrastructure account for --ocm-role; defaults to the signed-in AWS account")
     parser.add_argument("--billing-account", help="Explicit billing account, otherwise use Terraform/Make configuration")
     parser.add_argument("--ocm-role", action="store_true", help="Check the infrastructure OCM role instead of billing")
     args = parser.parse_args()
     try:
-        account = args.aws_account or output(
-            ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
-            "Cannot identify the AWS account. Sign in to the lab first.",
-        )
+        if args.ocm_role:
+            account = args.aws_account or output(
+                ["aws", "sts", "get-caller-identity", "--query", "Account", "--output", "text"],
+                "Cannot identify the AWS account. Sign in to the lab first.",
+            )
+        else:
+            billing = args.billing_account if args.billing_account is not None else configured_billing_account()
+            if not re.fullmatch(r"[0-9]{12}", billing):
+                raise PrerequisiteError("A valid 12-digit AWS billing account ID is required.")
         token = output(["rosa", "token"], "Cannot obtain a Red Hat access token. Run rosa login first.")
         if not token:
             raise PrerequisiteError("Red Hat did not return an access token.")
         if args.ocm_role:
             print("OCM role already linked: " + check_ocm_role(account, token))
         else:
-            billing = args.billing_account or configured_billing_account(account)
             organization = check_billing(billing, token)
             print(f"ROSA HCP Marketplace billing ready: AWS {billing}, Red Hat organization {organization}.")
     except MissingOCMRole as error:

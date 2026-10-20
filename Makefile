@@ -7,9 +7,6 @@ NO_CNI ?= false
 BILLING_ACCOUNT_ID ?=
 export BILLING_ACCOUNT_ID
 TF_VAR_ARGS := -var=cluster_name=$(NAME) -var=no_cni=$(NO_CNI)
-ifneq ($(strip $(BILLING_ACCOUNT_ID)),)
-TF_VAR_ARGS += -var=aws_billing_account_id=$(BILLING_ACCOUNT_ID)
-endif
 # Pin workspace per-command so parallel make deploy NAME=... from other shells do not race.
 TF := TF_WORKSPACE=$(NAME) terraform
 
@@ -91,21 +88,25 @@ _validate: check-name
 _tf-deploy: check-name
 	@bash -c 'set -euo pipefail; \
 		source "$(CURDIR)/scripts/load-creds.sh"; \
+		billing_args=(); \
+		if [ -n "$${BILLING_ACCOUNT_ID:-}" ]; then billing_args+=("-var=aws_billing_account_id=$${BILLING_ACCOUNT_ID}"); fi; \
 		export TF_WORKSPACE="$(NAME)"; \
 		echo "Generating Terraform execution plan for $(NAME)..."; \
-		terraform plan $(TF_VAR_ARGS); \
+		terraform plan $(TF_VAR_ARGS) "$${billing_args[@]}"; \
 		echo "Applying Terraform configuration for $(NAME)..."; \
-		terraform apply -auto-approve $(TF_VAR_ARGS)'
+		terraform apply -auto-approve $(TF_VAR_ARGS) "$${billing_args[@]}"'
 
 # One shell: load RHCS + AWS credentials, then full destroy flow (creds stay in memory only).
 _destroy: check-name _workspace
 	@bash -c 'set -euo pipefail; \
 		source "$(CURDIR)/scripts/load-creds.sh"; \
+		billing_args=(); \
+		if [ -n "$${BILLING_ACCOUNT_ID:-}" ]; then billing_args+=("-var=aws_billing_account_id=$${BILLING_ACCOUNT_ID}"); fi; \
 		export TF_WORKSPACE="$(NAME)"; \
 		_state="$$(terraform state list 2>/dev/null || true)"; \
 		echo "Destroying ROSA cluster $(NAME) first..."; \
 		if printf "%s\n" "$$_state" | grep -q "module.rosa_cluster_hcp"; then \
-			terraform destroy -target=module.rosa_cluster_hcp -auto-approve $(TF_VAR_ARGS); \
+			terraform destroy -target=module.rosa_cluster_hcp -auto-approve $(TF_VAR_ARGS) "$${billing_args[@]}"; \
 		else \
 			echo "  (cluster already gone from state)"; \
 		fi; \
@@ -114,10 +115,10 @@ _destroy: check-name _workspace
 		echo "Destroying remaining infrastructure for $(NAME)..."; \
 		_state="$$(terraform state list 2>/dev/null || true)"; \
 		if [ -n "$$_state" ]; then \
-			if ! terraform destroy -auto-approve $(TF_VAR_ARGS); then \
+			if ! terraform destroy -auto-approve $(TF_VAR_ARGS) "$${billing_args[@]}"; then \
 				echo "Destroy failed; retrying orphan cleanup then destroy..."; \
 				./cleanup_vpc_orphans.sh; \
-				terraform destroy -auto-approve $(TF_VAR_ARGS); \
+				terraform destroy -auto-approve $(TF_VAR_ARGS) "$${billing_args[@]}"; \
 			fi; \
 		else \
 			echo "  (terraform state already empty)"; \

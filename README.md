@@ -25,7 +25,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
    EOF
    ```
 
-3. **Billing, IAM roles and quota:** `make prereq` signs in with the service account and preserves an existing OCM role association. If one is missing, it runs `rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes`. It then checks the selected billing account against the Red Hat organization's eligible ROSA HCP billing accounts. Missing Marketplace linking stops deployment before Terraform creates network or cluster resources. After that check it prepares the load-balancer service-linked role and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
+3. **Billing, IAM roles and quota:** `make prereq` requires an explicitly selected payer and checks its eligibility in the Red Hat organization before preparing IAM roles. It preserves an existing OCM role association; if one is missing, it runs `rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes`. It then prepares the load-balancer service-linked role and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
 
 4. **Credentials on deploy/clean:** `make deploy` runs `make prereq`, then sources `.env` in-process. It uses AWS credentials already in the shell. It calls `auth-aws` only when those credentials are absent. Overrides: `DOTENV=...`, `AUTH_AWS=...`.
 
@@ -45,12 +45,20 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 
    `cluster_name` in `terraform.tfvars` is overridden by `NAME=` on the command line.
 
+   The organizer must configure the approved payer, either as `aws_billing_account_id` in `terraform.tfvars` or in the shell:
+
+   ```bash
+   export BILLING_ACCOUNT_ID="YOUR_APPROVED_12_DIGIT_ACCOUNT"
+   ```
+
+   Cloud Terminal supplies this variable when its organizer has configured `ROSA_BILLING_ACCOUNT_ID`. Keep the setting for subsequent deploy and cleanup commands.
+
 3. **Deploy a cluster** (`NAME` is required). This runs `make prereq` first:
    ```bash
    make deploy NAME=fja-hcp1
    ```
 
-   By default, the cluster's AWS account also pays for ROSA HCP. If your organizer supplies a different eligible payer, use `make deploy NAME=fja-hcp1 BILLING_ACCOUNT_ID=123456789012`, or set `aws_billing_account_id` in `terraform.tfvars`. The prerequisite check and Terraform use the same selection. An AWS Organizations management account is not automatically an eligible ROSA payer.
+   No billing account is selected automatically. To use the lab account for billing, the organizer must explicitly select it and it must pass the same Marketplace eligibility check. An AWS Organizations management account is not automatically an eligible ROSA payer.
 
 4. **Connect to the cluster:**
    ```bash
@@ -98,7 +106,7 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 - `cluster_name`: Name of the ROSA cluster (set via `NAME=` for make targets)
 - `aws_region`: AWS region for deployment
-- `aws_billing_account_id`: Eligible ROSA HCP billing account; defaults to the infrastructure account. `BILLING_ACCOUNT_ID` overrides it for Make targets.
+- `aws_billing_account_id`: Required organizer-approved ROSA HCP billing account. `BILLING_ACCOUNT_ID` overrides it for Make targets. There is no infrastructure-account fallback.
 - `global_tags`: Global tags applied to all resources (optional)
 - `vpc_cidr`: CIDR block for VPC
 - `availability_zones_count`: Number of availability zones
