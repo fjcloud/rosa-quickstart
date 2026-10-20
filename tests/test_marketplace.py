@@ -128,6 +128,32 @@ class MarketplaceTests(unittest.TestCase):
                 self.assertIn('-var=aws_billing_account_id=' + PAYER, command)
                 self.assertNotIn(LAB, command)
 
+    def test_outdated_cli_upgrade_rejects_a_bad_checksum_without_replacing_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            binary = directory / 'bin'
+            binary.mkdir()
+            commands = {
+                'rosa': '#!/bin/sh\nif [ "$*" = "create ocm-role --help" ]; then echo --admin; exit 0; fi\ntouch "$HOME/forbidden"; exit 91\n',
+                'curl': '#!/bin/sh\nprintf "%s\\n" "$*" > "$HOME/download-call"\nfor arg; do dest="$arg"; done\nprintf corrupt-archive > "$dest"\n',
+                'terraform': '#!/bin/sh\ntouch "$HOME/forbidden"; exit 91\n',
+            }
+            for name, body in commands.items():
+                path = binary / name
+                path.write_text(body)
+                path.chmod(0o755)
+            original = (binary / 'rosa').read_bytes()
+            env = {**os.environ, 'HOME': tmp, 'PATH': str(binary)+':'+os.environ['PATH'],
+                   'DOTENV': str(directory / 'absent.env'), 'RHCS_TOKEN': 'test-only-token',
+                   'AWS_ACCESS_KEY_ID': 'test'}
+            result = subprocess.run(['bash', str(ROOT / 'scripts/prereq.sh')], env=env,
+                                    text=True, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('pub/cgw/rosa/1.2.66/', (directory / 'download-call').read_text())
+            self.assertIn('FAILED', result.stdout)
+            self.assertEqual((binary / 'rosa').read_bytes(), original)
+            self.assertFalse((directory / 'forbidden').exists())
+
     def test_prereq_stops_before_iam_and_terraform_on_missing_billing(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -135,7 +161,7 @@ class MarketplaceTests(unittest.TestCase):
             binary.mkdir()
             commands = {
                 'aws': '#!/bin/sh\ncase "$1 $2" in "sts get-caller-identity") echo '+LAB+';; *) echo forbidden-aws-mutation >> "$HOME/forbidden"; exit 91;; esac\n',
-                'rosa': '#!/bin/sh\nif [ "$1" = login ]; then exit 0; fi\necho forbidden-rosa-mutation >> "$HOME/forbidden"; exit 91\n',
+                'rosa': '#!/bin/sh\nif [ "$*" = "create ocm-role --help" ]; then echo --no-console; exit 0; fi\nif [ "$1" = login ]; then exit 0; fi\necho forbidden-rosa-mutation >> "$HOME/forbidden"; exit 91\n',
                 'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) echo forbidden-ocm-check >> "$HOME/forbidden"; exit 91;; *) echo billing-not-linked >&2; exit 1;; esac\n',
                 'terraform': '#!/bin/sh\necho forbidden-terraform >> "$HOME/forbidden"; exit 91\n',
                 'oc': '#!/bin/sh\nexit 0\n',
@@ -159,7 +185,7 @@ class MarketplaceTests(unittest.TestCase):
             binary.mkdir()
             commands = {
                 'aws': '#!/bin/sh\ncase "$1 $2" in "sts get-caller-identity") echo '+LAB+';; *) echo stopped-after-ocm-verification; exit 91;; esac\n',
-                'rosa': '#!/bin/sh\nif [ "$1" = login ]; then exit 0; fi\ntest -f "$HOME/billing-checked" || exit 92\nprintf "%s\\n" "$*" > "$HOME/ocm-call"\n',
+                'rosa': '#!/bin/sh\nif [ "$*" = "create ocm-role --help" ]; then echo --no-console; exit 0; fi\nif [ "$1" = login ]; then exit 0; fi\ntest -f "$HOME/billing-checked" || exit 92\nprintf "%s\\n" "$*" > "$HOME/ocm-call"\n',
                 'python3': '#!/bin/sh\ncase "$*" in *--ocm-role*) if [ -f "$HOME/ocm-checked" ]; then test -f "$HOME/ocm-call"; else touch "$HOME/ocm-checked"; exit 3; fi;; *) touch "$HOME/billing-checked";; esac\n',
                 'terraform': '#!/bin/sh\necho forbidden > "$HOME/terraform-call"; exit 91\n',
                 'oc': '#!/bin/sh\nexit 0\n',

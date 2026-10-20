@@ -37,17 +37,24 @@ if ! command -v terraform >/dev/null 2>&1; then
   rm -rf "${tmp}"
 fi
 
-if ! command -v rosa >/dev/null 2>&1; then
-  if [[ "$(uname -m)" != "x86_64" ]]; then
-    echo "Error: rosa is not on PATH. Install it from https://mirror.openshift.com/pub/openshift-v4/clients/rosa/latest/" >&2
-    exit 1
-  fi
-  echo "Installing the ROSA CLI..."
-  tmp="$(mktemp -d)"
-  curl -fsSL https://mirror.openshift.com/pub/openshift-v4/clients/rosa/latest/rosa-linux.tar.gz -o "${tmp}/rosa.tar.gz"
-  tar --no-same-owner -C "${tmp}" -xzf "${tmp}/rosa.tar.gz" rosa
-  install_bin "${tmp}/rosa"
-  rm -rf "${tmp}"
+if ! command -v rosa >/dev/null 2>&1 || ! rosa create ocm-role --help 2>/dev/null | grep -F -- '--no-console' >/dev/null; then
+  case "$(uname -m)" in
+    x86_64) rosa_archive=rosa-linux.tar.gz; rosa_checksum=9f29b7a55adfd5f58ec0239e5e5c6bb9d8143f7184232166b2d8630db13c3279 ;;
+    aarch64|arm64) rosa_archive=rosa-linux-arm64.tar.gz; rosa_checksum=a6ec6c015fe08e3582d7aa926ef89c76dde5eafc4b90c9eeba01eaf653c0a029 ;;
+    *) echo "Error: install ROSA >= 1.2.64 for your platform from https://mirror.openshift.com/pub/cgw/rosa/" >&2; exit 1 ;;
+  esac
+  echo "Installing ROSA 1.2.66 with no-console OCM support..."
+  (
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "${tmp}"' EXIT
+    curl -fsSL "https://mirror.openshift.com/pub/cgw/rosa/1.2.66/${rosa_archive}" -o "${tmp}/rosa.tar.gz"
+    printf '%s  %s\n' "${rosa_checksum}" "${tmp}/rosa.tar.gz" | sha256sum -c -
+    tar --no-same-owner -C "${tmp}" -xzf "${tmp}/rosa.tar.gz" rosa
+    "${tmp}/rosa" create ocm-role --help > "${tmp}/ocm-help"
+    grep -q -- '--no-console' "${tmp}/ocm-help"
+    install_bin "${tmp}/rosa"
+  )
+  hash -r
 fi
 
 if ! command -v oc >/dev/null 2>&1; then

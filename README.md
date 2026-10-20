@@ -7,7 +7,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 ## Prerequisites
 
 - AWS CLI credentials in the environment, or a working `aws` profile. The workshop shell is already signed in. `/usr/local/bin/auth-aws` is only a fallback for a Red Hat employee shell that has no AWS credentials yet.
-- Terraform >= 1.0, the ROSA CLI, and `oc`. `make prereq` installs Terraform when it is missing, and installs `rosa` and `oc` on x86_64 when they are missing.
+- Terraform >= 1.0, ROSA >= 1.2.64 with `--no-console`, and `oc`. `make prereq` installs missing tools and upgrades an incompatible ROSA CLI to checksum-verified 1.2.66 from the current Red Hat mirror on Linux x86_64/arm64.
 - A Red Hat Cloud Services service account (or `RHCS_TOKEN`)
 - A ROSA HCP Marketplace billing account linked to the **same Red Hat organization** as that identity. The billing account can differ from the AWS account hosting the cluster. The organizer completes the association through the [AWS ROSA console](https://console.aws.amazon.com/rosa/home#/get-started) and **Continue to Red Hat → Connect accounts**. A successful `rosa whoami` or an OCM IAM role link alone does not satisfy this prerequisite.
 
