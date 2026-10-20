@@ -4,7 +4,12 @@
 NAME ?=
 # NO_CNI=true opts out of OVN-Kubernetes (rosa --no-cni). Default keeps the CNI.
 NO_CNI ?= false
+BILLING_ACCOUNT_ID ?=
+export BILLING_ACCOUNT_ID
 TF_VAR_ARGS := -var=cluster_name=$(NAME) -var=no_cni=$(NO_CNI)
+ifneq ($(strip $(BILLING_ACCOUNT_ID)),)
+TF_VAR_ARGS += -var=aws_billing_account_id=$(BILLING_ACCOUNT_ID)
+endif
 # Pin workspace per-command so parallel make deploy NAME=... from other shells do not race.
 TF := TF_WORKSPACE=$(NAME) terraform
 
@@ -17,7 +22,7 @@ export PATH := $(HOME)/.local/bin:$(PATH)
 # Default target
 help:
 	@echo "Available targets:"
-	@echo "  prereq              - Install tools, link the AWS account, check quota"
+	@echo "  prereq              - Install tools, prepare OCM, check Marketplace billing and quota"
 	@echo "  deploy NAME=<name>  - Run prereq, then deploy a ROSA HCP cluster"
 	@echo "  clean NAME=<name>   - Destroy that cluster/workspace"
 	@echo "  output NAME=<name>  - Print oc login command for that cluster"

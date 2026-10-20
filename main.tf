@@ -40,6 +40,16 @@ variable "cluster_name" {
   default     = "my-cluster"
 }
 
+variable "aws_billing_account_id" {
+  description = "AWS account linked to the Red Hat organization for ROSA HCP Marketplace billing. Defaults to the infrastructure account."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.aws_billing_account_id == null || var.aws_billing_account_id == "" || can(regex("^[0-9]{12}$", var.aws_billing_account_id))
+    error_message = "aws_billing_account_id must contain exactly 12 digits."
+  }
+}
+
 
 variable "private" {
   description = "Does the cluster is private"
@@ -138,6 +148,8 @@ module "operator_roles" {
 # ROSA HCP Cluster
 module "rosa_cluster_hcp" {
   source = "./modules/rosa-cluster-hcp"
+
+  aws_billing_account_id = var.aws_billing_account_id
 
   cluster_name         = var.cluster_name
   openshift_version    = var.openshift_version

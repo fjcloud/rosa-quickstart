@@ -5,3 +5,5 @@ terraform.tfstate*
 terraform.tfstate.d/
 workdir/
 https:/
+__pycache__/
+*.pyc

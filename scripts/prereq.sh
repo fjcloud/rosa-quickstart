@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prepare a fresh AWS account for `make deploy`.
-# Links the account to the Red Hat org, checks ROSA HCP quota, installs
+# Prepares the OCM role, verifies Marketplace billing, checks ROSA HCP quota, installs
 # Terraform when it is missing, and writes terraform.tfvars when absent.
 set -euo pipefail
 
@@ -80,83 +80,21 @@ region="${region:-us-east-2}"
 export AWS_DEFAULT_REGION="${region}"
 echo "AWS account ${account}, region ${region}"
 
-ensure_role() {
-  local kind="$1"
-  shift
-  local output
-  if ! output="$("$@" 2>&1)"; then
-    if ! grep -Eqi 'already exists|AlreadyExists' <<<"${output}"; then
-      printf '%s\n' "${output}" >&2
-      exit 1
-    fi
-  fi
-  printf '%s\n' "${output}"
-}
+# ROSA/Terraform needs the no-console OCM role; it does not need a user-role.
+# Preserve an existing association instead of upgrading it to an admin profile.
+status=0
+python3 "${root}/scripts/check-marketplace.py" --aws-account "${account}" --ocm-role || status=$?
+if [[ "${status}" -eq 3 ]]; then
+  rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes
+  python3 "${root}/scripts/check-marketplace.py" --aws-account "${account}" --ocm-role
+elif [[ "${status}" -ne 0 ]]; then
+  exit "${status}"
+fi
 
-echo "Ensuring the OpenShift Cluster Manager role and the user role exist..."
-ensure_role ocm rosa create ocm-role --mode auto --admin --prefix ManagedOpenShift --yes
-ensure_role user rosa create user-role --mode auto --prefix ManagedOpenShift --yes
+# Billing may use a different account; validate the selected payer before Terraform.
+echo "Checking the ROSA HCP Marketplace billing association..."
+python3 "${root}/scripts/check-marketplace.py" --aws-account "${account}"
 
-link_roles() {
-  local label="$1" list_name="$2" link_name="$3"
-  rosa list "${list_name}" -o json > /tmp/rosa-roles.json
-  local status=0
-  python3 - <<'PY' || status=$?
-import json, sys
-data = json.load(open("/tmp/rosa-roles.json"))
-if isinstance(data, dict):
-    data = data.get("items") or data.get("roles") or []
-rows = []
-for item in data:
-    if not isinstance(item, dict):
-        continue
-    arn = (
-        item.get("Role ARN")
-        or item.get("OCM Role ARN")
-        or item.get("User Role ARN")
-        or item.get("RoleARN")
-        or item.get("role_arn")
-        or item.get("arn")
-        or ""
-    )
-    linked = str(item.get("Linked") or item.get("linked") or "")
-    admin = str(item.get("Admin") or item.get("admin") or "")
-    if arn:
-        rows.append((admin.lower() in {"yes", "true"}, linked.lower() in {"yes", "true"}, arn))
-if not rows:
-    sys.exit(2)
-rows.sort(key=lambda row: (not row[0], not row[1]))
-open("/tmp/rosa-role-pick", "w").write(("link\n" if not rows[0][1] else "ok\n") + rows[0][2] + "\n")
-PY
-  if [[ "${status}" -ne 0 ]]; then
-    if [[ "${status}" -eq 2 ]]; then
-      echo "Error: no ${label} role was found in account ${account}." >&2
-    else
-      echo "Error: could not read ${label} roles (exit ${status})." >&2
-    fi
-    exit 1
-  fi
-  local action arn
-  action="$(sed -n '1p' /tmp/rosa-role-pick)"
-  arn="$(sed -n '2p' /tmp/rosa-role-pick)"
-  rm -f /tmp/rosa-roles.json /tmp/rosa-role-pick
-  if [[ "${action}" == "ok" ]]; then
-    echo "${label} role is already linked."
-    return
-  fi
-  echo "Linking ${label} role..."
-  local link_out
-  if ! link_out="$(rosa link "${link_name}" --role-arn "${arn}" --yes 2>&1)"; then
-    if ! grep -Eqi 'already linked|already associated' <<<"${link_out}"; then
-      printf '%s\n' "${link_out}" >&2
-      exit 1
-    fi
-  fi
-  printf '%s\n' "${link_out}"
-}
-
-link_roles OCM ocm-roles ocm-role
-link_roles user user-roles user-role
 
 echo "Ensuring the load balancer service-linked role exists..."
 slr_out="$(aws iam create-service-linked-role --aws-service-name elasticloadbalancing.amazonaws.com 2>&1 || true)"

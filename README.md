@@ -9,6 +9,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 - AWS CLI credentials in the environment, or a working `aws` profile. The workshop shell is already signed in. `/usr/local/bin/auth-aws` is only a fallback for a Red Hat employee shell that has no AWS credentials yet.
 - Terraform >= 1.0, the ROSA CLI, and `oc`. `make prereq` installs Terraform when it is missing, and installs `rosa` and `oc` on x86_64 when they are missing.
 - A Red Hat Cloud Services service account (or `RHCS_TOKEN`)
+- A ROSA HCP Marketplace billing account linked to the **same Red Hat organization** as that identity. The billing account can differ from the AWS account hosting the cluster. The organizer completes the association through the [AWS ROSA console](https://console.aws.amazon.com/rosa/home#/get-started) and **Continue to Red Hat → Connect accounts**. A successful `rosa whoami` or an OCM IAM role link alone does not satisfy this prerequisite.
 
 ## Authentication
 
@@ -24,7 +25,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
    EOF
    ```
 
-3. **Account link and quota:** `make prereq` signs in with the service account, creates and links the OCM role and the user role, creates the load-balancer service-linked role, and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
+3. **Billing, IAM roles and quota:** `make prereq` signs in with the service account and preserves an existing OCM role association. If one is missing, it runs `rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes`. It then checks the selected billing account against the Red Hat organization's eligible ROSA HCP billing accounts. Missing Marketplace linking stops deployment before Terraform creates network or cluster resources. After that check it prepares the load-balancer service-linked role and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
 
 4. **Credentials on deploy/clean:** `make deploy` runs `make prereq`, then sources `.env` in-process. It uses AWS credentials already in the shell. It calls `auth-aws` only when those credentials are absent. Overrides: `DOTENV=...`, `AUTH_AWS=...`.
 
@@ -48,6 +49,8 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
    ```bash
    make deploy NAME=fja-hcp1
    ```
+
+   By default, the cluster's AWS account also pays for ROSA HCP. If your organizer supplies a different eligible payer, use `make deploy NAME=fja-hcp1 BILLING_ACCOUNT_ID=123456789012`, or set `aws_billing_account_id` in `terraform.tfvars`. The prerequisite check and Terraform use the same selection. An AWS Organizations management account is not automatically an eligible ROSA payer.
 
 4. **Connect to the cluster:**
    ```bash
@@ -84,7 +87,7 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 | Target | Description |
 |--------|-------------|
-| `make prereq` | tools, Red Hat account link, quota, default `terraform.tfvars` |
+| `make prereq` | tools, OCM role, Marketplace billing check, quota, default `terraform.tfvars` |
 | `make deploy NAME=<name>` | prereq → init → plan → apply → print oc login |
 | `make clean NAME=<name>` | destroy cluster + VPC orphans + workspace |
 | `make output NAME=<name>` | print oc login command |
@@ -95,6 +98,7 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 - `cluster_name`: Name of the ROSA cluster (set via `NAME=` for make targets)
 - `aws_region`: AWS region for deployment
+- `aws_billing_account_id`: Eligible ROSA HCP billing account; defaults to the infrastructure account. `BILLING_ACCOUNT_ID` overrides it for Make targets.
 - `global_tags`: Global tags applied to all resources (optional)
 - `vpc_cidr`: CIDR block for VPC
 - `availability_zones_count`: Number of availability zones
