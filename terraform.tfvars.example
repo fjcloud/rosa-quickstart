@@ -3,10 +3,6 @@
 cluster_name = "my-cluster"
 aws_region   = "eu-west-3"
 
-# Required: explicitly select the organizer-approved ROSA HCP billing account.
-# Set aws_billing_account_id here, or export BILLING_ACCOUNT_ID in your shell.
-# aws_billing_account_id = "YOUR_APPROVED_12_DIGIT_ACCOUNT"
-
 # Common tags for all resources (optional)
 #global_tags = {
 #  "app-code"      = "YOUR-APP-CODE"

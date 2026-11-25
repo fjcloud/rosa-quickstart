@@ -9,7 +9,6 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 - AWS CLI credentials in the environment, or a working `aws` profile. The workshop shell is already signed in. `/usr/local/bin/auth-aws` is only a fallback for a Red Hat employee shell that has no AWS credentials yet.
 - Terraform >= 1.0, ROSA >= 1.2.64 with `--no-console`, and `oc`. `make prereq` installs missing tools and upgrades an incompatible ROSA CLI to checksum-verified 1.2.66 from the current Red Hat mirror on Linux x86_64/arm64.
 - A Red Hat Cloud Services service account (or `RHCS_TOKEN`)
-- A ROSA HCP Marketplace billing account linked to the **same Red Hat organization** as that identity. The billing account can differ from the AWS account hosting the cluster. The organizer completes the association through the [AWS ROSA console](https://console.aws.amazon.com/rosa/home#/get-started) and **Continue to Red Hat → Connect accounts**. A successful `rosa whoami` or an OCM IAM role link alone does not satisfy this prerequisite.
 
 ## Authentication
 
@@ -25,7 +24,7 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
    EOF
    ```
 
-3. **Billing, IAM roles and quota:** `make prereq` requires an explicitly selected payer and checks its eligibility in the Red Hat organization before preparing IAM roles. It preserves an existing OCM role association; if one is missing, it runs `rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes`. It then prepares the load-balancer service-linked role and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
+3. **IAM role and quota:** `make prereq` preserves an existing OCM role association. If one is missing, it runs `rosa create ocm-role --no-console --mode auto --prefix CloudTerminal --yes`. It then prepares the load-balancer service-linked role and checks vCPU, NAT, Elastic IP, and VPC quota. When `terraform.tfvars` is missing it writes one for the current AWS region: one availability zone and two workers, which is the smallest ROSA HCP cluster.
 
 4. **Credentials on deploy/clean:** `make deploy` runs `make prereq`, then sources `.env` in-process. It uses AWS credentials already in the shell. It calls `auth-aws` only when those credentials are absent. Overrides: `DOTENV=...`, `AUTH_AWS=...`.
 
@@ -45,20 +44,10 @@ Supports **multiple clusters** at once: each `NAME` gets its own Terraform works
 
    `cluster_name` in `terraform.tfvars` is overridden by `NAME=` on the command line.
 
-   The organizer must configure the approved payer, either as `aws_billing_account_id` in `terraform.tfvars` or in the shell:
-
-   ```bash
-   export BILLING_ACCOUNT_ID="YOUR_APPROVED_12_DIGIT_ACCOUNT"
-   ```
-
-   Cloud Terminal supplies this variable when its organizer has configured `ROSA_BILLING_ACCOUNT_ID`. Keep the setting for subsequent deploy and cleanup commands.
-
 3. **Deploy a cluster** (`NAME` is required). This runs `make prereq` first:
    ```bash
    make deploy NAME=fja-hcp1
    ```
-
-   No billing account is selected automatically. To use the lab account for billing, the organizer must explicitly select it and it must pass the same Marketplace eligibility check. An AWS Organizations management account is not automatically an eligible ROSA payer.
 
 4. **Connect to the cluster:**
    ```bash
@@ -95,7 +84,7 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 | Target | Description |
 |--------|-------------|
-| `make prereq` | tools, OCM role, Marketplace billing check, quota, default `terraform.tfvars` |
+| `make prereq` | tools, OCM role, quota, default `terraform.tfvars` |
 | `make deploy NAME=<name>` | prereq → init → plan → apply → print oc login |
 | `make clean NAME=<name>` | destroy cluster + VPC orphans + workspace |
 | `make output NAME=<name>` | print oc login command |
@@ -106,7 +95,6 @@ The orphan script skips Terraform-managed NAT/NLB ENIs (`ela-attach`); those are
 
 - `cluster_name`: Name of the ROSA cluster (set via `NAME=` for make targets)
 - `aws_region`: AWS region for deployment
-- `aws_billing_account_id`: Required organizer-approved ROSA HCP billing account. `BILLING_ACCOUNT_ID` overrides it for Make targets. There is no infrastructure-account fallback.
 - `global_tags`: Global tags applied to all resources (optional)
 - `vpc_cidr`: CIDR block for VPC
 - `availability_zones_count`: Number of availability zones
